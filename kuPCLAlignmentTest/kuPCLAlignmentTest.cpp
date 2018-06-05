@@ -3,6 +3,7 @@
 #include <iostream>
 #include <pcl/point_types.h>
 #include <pcl/features/normal_3d_omp.h>
+#include <pcl/features/shot_omp.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/keypoints/iss_3d.h>
 #include <ANN.h>
@@ -79,6 +80,10 @@ void WriteKeypointsToFile(char * filename, pcl::PointCloud<pcl::PointXYZ>::Ptr p
 	pcl::PointIndicesConstPtr keypointIndices);
 void EstimateSurfaceNormals(pcl::PointCloud<pcl::PointXYZ>::Ptr pcd,
 	pcl::PointCloud<pcl::Normal>::Ptr &normals);
+void CalculateSHOTDescriptors(pcl::PointCloud<pcl::PointXYZ>::Ptr pcd,
+							  pcl::PointCloud<pcl::Normal>::Ptr normals,
+							  pcl::PointCloud<pcl::PointXYZ>::Ptr keypoints,
+							  pcl::PointCloud<pcl::SHOT352>::Ptr &decriptors);
 
 void main()
 {
@@ -95,8 +100,8 @@ void main()
 	pcl::PointCloud<pcl::PointXYZ>::Ptr tarKeyPts(new pcl::PointCloud<pcl::PointXYZ>);
 	pcl::PointIndicesConstPtr			srcKeypointsIndices;
 	pcl::PointIndicesConstPtr			tarKeypointsIndices;
-	pcl::PointCloud<pcl::SHOT352>		srcDescriptors;
-	pcl::PointCloud<pcl::SHOT352>		tarDesciprtors;
+	pcl::PointCloud<pcl::SHOT352>::Ptr	srcDescriptors(new pcl::PointCloud<pcl::SHOT352>);
+	pcl::PointCloud<pcl::SHOT352>::Ptr	tarDesciprtors(new pcl::PointCloud<pcl::SHOT352>);
 
 	LoadPCDFromFile("SampledRealSurface.txt", srcPCD, srcPtsNum);
 	std::cout << "Source point num = " << srcPtsNum << std::endl;
@@ -190,4 +195,17 @@ void EstimateSurfaceNormals(pcl::PointCloud<pcl::PointXYZ>::Ptr pcd, pcl::PointC
 	normalEst.setKSearch(10);
 	normalEst.setInputCloud(pcd);
 	normalEst.compute(*normals);
+}
+
+void CalculateSHOTDescriptors(pcl::PointCloud<pcl::PointXYZ>::Ptr pcd, double res, pcl::PointCloud<pcl::Normal>::Ptr normals, pcl::PointCloud<pcl::PointXYZ>::Ptr keypoints, pcl::PointCloud<pcl::SHOT352>::Ptr &descriptors)
+{
+	pcl::SHOTEstimationOMP<pcl::PointXYZ, pcl::Normal, pcl::SHOT352> descriptorEst;
+
+	descriptorEst.setRadiusSearch(10 * res);
+	descriptorEst.setInputCloud(keypoints);
+	descriptorEst.setInputNormals(normals);
+	descriptorEst.setSearchSurface(pcd);
+	descriptorEst.compute(*descriptors);
+
+
 }
