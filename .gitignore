@@ -242,3 +242,12 @@ ModelManifest.xml
 .fake/
 /PCL181.props
 /ANN_x64_Debug.props
+/kuPCLAlignmentTest/PCL181.props
+/kuPCLAlignmentTest/ANN.props
+/kuPCLAlignmentTest/srcNormals.txt
+/kuPCLAlignmentTest/srcKeypts.txt
+/kuPCLAlignmentTest/SampledRealSurface.txt
+/kuPCLAlignmentTest/NeighborInfo.txt
+/kuPCLAlignmentTest/Neighbor distance.txt
+/kuPCLAlignmentTest/MatchPts.txt
+/kuPCLAlignmentTest/CroppedCTSurface.txt

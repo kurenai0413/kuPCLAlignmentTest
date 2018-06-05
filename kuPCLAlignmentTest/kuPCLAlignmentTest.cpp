@@ -81,9 +81,11 @@ void WriteKeypointsToFile(char * filename, pcl::PointCloud<pcl::PointXYZ>::Ptr p
 void EstimateSurfaceNormals(pcl::PointCloud<pcl::PointXYZ>::Ptr pcd,
 	pcl::PointCloud<pcl::Normal>::Ptr &normals);
 void CalculateSHOTDescriptors(pcl::PointCloud<pcl::PointXYZ>::Ptr pcd,
+							  double res,
 							  pcl::PointCloud<pcl::Normal>::Ptr normals,
 							  pcl::PointCloud<pcl::PointXYZ>::Ptr keypoints,
 							  pcl::PointCloud<pcl::SHOT352>::Ptr &decriptors);
+void MatchKeypoints(pcl::PointCloud<pcl::SHOT352>::Ptr srcDes, pcl::PointCloud<pcl::SHOT352>::Ptr tarDes);
 
 void main()
 {
@@ -100,8 +102,9 @@ void main()
 	pcl::PointCloud<pcl::PointXYZ>::Ptr tarKeyPts(new pcl::PointCloud<pcl::PointXYZ>);
 	pcl::PointIndicesConstPtr			srcKeypointsIndices;
 	pcl::PointIndicesConstPtr			tarKeypointsIndices;
-	pcl::PointCloud<pcl::SHOT352>::Ptr	srcDescriptors(new pcl::PointCloud<pcl::SHOT352>);
-	pcl::PointCloud<pcl::SHOT352>::Ptr	tarDesciprtors(new pcl::PointCloud<pcl::SHOT352>);
+	pcl::PointCloud<pcl::SHOT352>::Ptr	srcDescriptors(new pcl::PointCloud<pcl::SHOT352>());
+	pcl::PointCloud<pcl::SHOT352>::Ptr	tarDescriptors(new pcl::PointCloud<pcl::SHOT352>());
+	pcl::CorrespondencesPtr				corres(new pcl::Correspondences());
 
 	LoadPCDFromFile("SampledRealSurface.txt", srcPCD, srcPtsNum);
 	std::cout << "Source point num = " << srcPtsNum << std::endl;
@@ -131,8 +134,71 @@ void main()
 	ExtractISSKeypoints(srcPCD, srcRes, srcKeyPts, srcKeypointsIndices);
 	ExtractISSKeypoints(tarPCD, tarRes, tarKeyPts, tarKeypointsIndices);
 
-	WriteKeypointsToFile("Source_Keypoints.txt", srcPCD, srcKeypointsIndices);
-	WriteKeypointsToFile("Target_Keypoints.txt", tarPCD, tarKeypointsIndices);
+	CalculateSHOTDescriptors(srcPCD, srcRes, srcNormals, srcKeyPts, srcDescriptors);
+	CalculateSHOTDescriptors(tarPCD, tarRes, tarNormals, tarKeyPts, tarDescriptors);
+
+	std::vector<float>	corresDists;
+	std::vector<int>	corresIndices;
+	std::vector<int>	srcIndices;
+
+	pcl::KdTreeFLANN<pcl::SHOT352> matchSearch;   
+	matchSearch.setInputCloud(tarDescriptors);
+	for (size_t i = 0; i < srcDescriptors->size(); i++)
+	{
+		std::vector<int>   neighborIndice(1);
+		std::vector<float> neighborSqrtDist(1);
+
+		if (!pcl_isfinite(srcDescriptors->at(i).descriptor[0]))
+		{
+			continue;
+		}
+
+		int foundNeighbors = matchSearch.nearestKSearch(srcDescriptors->at(i), 1, neighborIndice, neighborSqrtDist);
+	
+		if (foundNeighbors == 1 && neighborSqrtDist[0] < 0.25f) // if find correspondence and distance below 0.25
+		{ 
+			pcl::Correspondence corr(neighborIndice[0], static_cast<int> (i), neighborSqrtDist[0]);
+			corres->push_back(corr);
+			corresDists.push_back(neighborSqrtDist[0]);
+			corresIndices.push_back(neighborIndice[0]);
+			srcIndices.push_back(i);
+		}
+	}
+
+	file.open("NeighborInfo.txt", std::ios::out);
+	for (int i = 0; i < corres->size(); i++)
+	{
+		file << i << ": " << "Src idx: " << srcIndices[i]
+			 << ", Tar idx: " << corresIndices[i] << ", dist: " << corresDists[i] << std::endl;
+	}
+	file.close();
+
+	std::cout << "Correspondence num: " << corres->size() << std::endl;
+
+	int matchPtsNum = corres->size();
+	std::vector<int>	srcMatchPtsIdx;
+	std::vector<int>	tarMatchPtsIdx;
+
+	for (int i = 0; i < matchPtsNum; i++)
+	{
+		srcMatchPtsIdx.push_back(srcKeypointsIndices->indices[srcIndices[i]]);
+		tarMatchPtsIdx.push_back(tarKeypointsIndices->indices[corresIndices[i]]);
+	}
+
+	file.open("MatchPts.txt", std::ios::out);
+	for (int i = 0; i < matchPtsNum; i++)
+	{
+		file << srcMatchPtsIdx[i] << " " << srcPCD->points[srcMatchPtsIdx[i]].x <<
+									 " " << srcPCD->points[srcMatchPtsIdx[i]].y <<
+									 " " << srcPCD->points[srcMatchPtsIdx[i]].z << " "
+			 << tarMatchPtsIdx[i] << " " << tarPCD->points[tarMatchPtsIdx[i]].x <<
+									 " " << tarPCD->points[tarMatchPtsIdx[i]].x <<
+									 " " << tarPCD->points[tarMatchPtsIdx[i]].x << std::endl;
+	}
+	file.close();
+
+	//WriteKeypointsToFile("Source_Keypoints.txt", srcPCD, srcKeypointsIndices);
+	//WriteKeypointsToFile("Target_Keypoints.txt", tarPCD, tarKeypointsIndices);
 
 	file.open("srcKeypts.txt", std::ios::out);
 	for (int i = 0; i < srcKeyPts->size(); i++)
@@ -194,6 +260,7 @@ void EstimateSurfaceNormals(pcl::PointCloud<pcl::PointXYZ>::Ptr pcd, pcl::PointC
 	pcl::NormalEstimationOMP<pcl::PointXYZ, pcl::Normal> normalEst;
 	normalEst.setKSearch(10);
 	normalEst.setInputCloud(pcd);
+	normalEst.setNumberOfThreads(16);
 	normalEst.compute(*normals);
 }
 
@@ -205,7 +272,13 @@ void CalculateSHOTDescriptors(pcl::PointCloud<pcl::PointXYZ>::Ptr pcd, double re
 	descriptorEst.setInputCloud(keypoints);
 	descriptorEst.setInputNormals(normals);
 	descriptorEst.setSearchSurface(pcd);
+	descriptorEst.setNumberOfThreads(16);
 	descriptorEst.compute(*descriptors);
 
+
+}
+
+void MatchKeypoints(pcl::PointCloud<pcl::SHOT352>::Ptr srcDes, pcl::PointCloud<pcl::SHOT352>::Ptr tarDes)
+{
 
 }
